@@ -1,8 +1,12 @@
 # Amazon Route 53 to Microsoft Azure DNS Transfer Script
 ## 4D Technologies LLC
 ### Author: Jeff E. Denis
+### Contributor: Ivan Ochagov
 
-## The Task at Hand
+## What's new
+I've modified a bit this script, for it to able to support multiple input zones from Route53 at once (Azure login and password are only asked once). Look for ZoneIds, ZoneNames and DomainNames arrays in main() (I didn't have time to make the code straightforward, sorry).
+
+## The Task at Hand                                                                                                                                          
 Recently, I was tasked with migrating our Amazon Route 53 DNS records to Microsoft Azure DNS. It's not uncommon to have several hundred DNS records for a given zone, and entering them by hand would be nothing less than tedious. So rather than trudge through just under five hundred records and hope that mistakes weren't introduced, I figured a script would be better suited for the task. 
 
 ## Prerequisites

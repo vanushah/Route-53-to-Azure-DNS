@@ -30,17 +30,10 @@ function defineEnvironment {
     $userDefAWSRegion = "" #AWS REGION (us-east-1)
     $userDefAWSFormat = ""
 
-    # AWS Route53 Hosted Zone to Transfer
-    $GLOBAL:route53HostedZone = "/hostedzone/[]" # [Hosted Zone Id]
-	
-	# Windows Azure Target Domain
-	$GLOBAL:userDefAzureDNSZone = "" # Target Azure DNS Zone Name
-    $GLOBAL:userDefAzureTargetDomain = "" # Target Azure DNS Domain
-
     # -------------------------------------------------------------------------------#
     
     # Configure the environment based on provided info
-    setupEnvironment (
+	setupEnvironment (
         $userDefAzureSubscriptionId,
         $userDefResourceGroup,
         $userDefAWSKeyId,
@@ -71,7 +64,7 @@ function setupEnvironment {
 
     # Azure Resource Group, Record Tag (to easily identify imported records), and DNS Domain
     Add-Member -InputObject $azureConfig -MemberType NoteProperty -Name resourceGroup -Value ($userDefResourceGroup)
-    Add-Member -InputObject $azureConfig -MemberType NoteProperty -Name azureDNSZone -Value (Get-AzureRmDnsZone -Name ($userDefAzureDNSZone) –ResourceGroupName $azureConfig.resourceGroup)
+  #  Add-Member -InputObject $azureConfig -MemberType NoteProperty -Name azureDNSZone -Value (Get-AzureRmDnsZone -Name ($userDefAzureDNSZone) –ResourceGroupName $azureConfig.resourceGroup)
 
     Write-Host -ForegroundColor White "Setting up AWS CLI Environment"
 
@@ -170,7 +163,7 @@ function parseRoute53 {
                 $existingRecord.Name = '@'
 
             } else {
-
+				
                 $existingRecord.Name = $existingRecord.Name.Replace($userDefAzureTargetDomain,'').TrimEnd('.')
 
             }
@@ -198,8 +191,7 @@ function azureImportRecords {
 
         # Check if a record set by this name already exists
         $recordPrecheck = Get-AzureRmDnsRecordSet -Name $ResourceRecords.Name -ResourceGroupName $azureConfig.resourceGroup -ZoneName $azureConfig.azureDNSZone.Name -RecordType $ResourceRecords.Type -ErrorAction SilentlyContinue
-
-        if ($recordPrecheck.Name -ne $ResourceRecords.Name -and $recordPrecheck.RecordType -ne $ResourceRecords.Type -and $recordPrecheck.Value -ne $ResourceRecords.Value ) {
+        if ($recordPrecRecords.Name -ne $ResourceRecords.Name -and $recordPrecheck.RecordType -ne $ResourceRecords.Type -and $recordPrecheck.Value -ne $ResourceRecords.Value) {
            
             # Configure the new record set and adjust the type as necessary before commiting the record
             if ($ResourceRecords.Type -eq 'A') {
@@ -243,15 +235,51 @@ function azureImportRecords {
                 newRecord
                 Add-AzureRmDnsRecordConfig -RecordSet $azureDNSRecordSet -Value $ResourceRecords.Value
                 commitRecord
-       
-            } else {
+			}
+        } elseif ($recordPrecheck.Name -eq $ResourceRecords.Name -and $recordPrecheck.RecordType -eq $ResourceRecords.Type -and ! ($recordPrecheck.Records | Where-Object {$ResourceRecords.Value -contains $_})) {
+					if ($ResourceRecords.Type -eq 'A') {
+						
+						Write-Host  -ForegroundColor Green "Modifying The"($ResourceRecords.Type)"set for"($ResourceRecords.Name)"!"
+						$rs = Get-AzureRmDnsRecordSet -name $ResourceRecords.Name -RecordType  $ResourceRecords.Type -ZoneName $azureConfig.azureDNSZone.Name -ResourceGroupName $azureConfig.resourceGroup
+						$rs.Records[0].Ipv4Address = $ResourceRecords.Value
+						Set-AzureRmDnsRecordSet -RecordSet $rs
 
-                # If the record was not one that we were expecting, map it as TXT to avoid loss and inform the user.
-                Write-Host -ForegroundColor Red "ERROR: Could not map the record type for"($ResourceRecords.Name)"!"
-                        
-            }
+					} elseif ($ResourceRecords.Type -eq 'AAAA') {
+                
+
+						Write-Host  -ForegroundColor Green "Modifying The"($ResourceRecords.Type)"set for"($ResourceRecords.Name)"!"
+						$rs = Get-AzureRmDnsRecordSet -name $ResourceRecords.Name -RecordType $ResourceRecords.Type -ZoneName $azureConfig.azureDNSZone.Name -ResourceGroupName $azureConfig.resourceGroup
+						$rs.Records[0].Ipv6Address = $ResourceRecords.Value
+						Set-AzureRmDnsRecordSet -RecordSet $rs
+
+					} elseif ($ResourceRecords.Type -eq 'CNAME') {
+
+						Write-Host  -ForegroundColor Green "Modifying The"($ResourceRecords.Type)"set for"($ResourceRecords.Name)"!"
+						$rs = Get-AzureRmDnsRecordSet -name $ResourceRecords.Name -RecordType $ResourceRecords.Type -ZoneName $azureConfig.azureDNSZone.Name -ResourceGroupName $azureConfig.resourceGroup
+						$rs.Records[0].Cname = $ResourceRecords.Value
+						Set-AzureRmDnsRecordSet -RecordSet $rs
 
 
+					} elseif ($ResourceRecords.Type -eq 'MX') {
+
+						Write-Host  -ForegroundColor Green "Modifying The"($ResourceRecords.Type)"set for"($ResourceRecords.Name)"!"
+						$rs = Get-AzureRmDnsRecordSet -name $ResourceRecords.Name -RecordType $ResourceRecords.Type -ZoneName $azureConfig.azureDNSZone.Name -ResourceGroupName $azureConfig.resourceGroup
+						$rs.Records[0].Exchange = $ResourceRecords.Value
+						$rs.Records[0].Preference = $ResourceRecords.Preference
+						Set-AzureRmDnsRecordSet -RecordSet $rs
+
+					} elseif ($ResourceRecords.Type -eq 'NS' -or $ResourceRecords.Type -eq 'SOA') {
+
+						Write-Host -ForegroundColor Gray "INFO: Encountered"($ResourceRecords.Type)"record. Skipping"
+            
+					} elseif ($ResourceRecords.Type -eq 'TXT' -or $ResourceRecords.Type -eq 'SPF') {
+
+						Write-Host  -ForegroundColor Green "Modifying The"($ResourceRecords.Type)"set for"($ResourceRecords.Name)"!"
+						$rs = Get-AzureRmDnsRecordSet -name $ResourceRecords.Name -RecordType $ResourceRecords.Type -ZoneName $azureConfig.azureDNSZone.Name -ResourceGroupName $azureConfig.resourceGroup
+						$rs.Records[0].Value = $ResourceRecords.Value
+						Set-AzureRmDnsRecordSet -RecordSet $rs
+					}
+	#>                        
         } else {
 			
 			# Warn the user if an existing record is discovered
@@ -314,7 +342,7 @@ function cleanup(){
     # -------------------------------------------
 
     Write-Host -ForegroundColor White "Cleanup: Removing Variables"
-    Remove-Variable -Scope Global -Name route53Records, azureConfig, AWSconfig, userDefAzureDNSZone, userDefAzureTargetDomain
+    Remove-Variable -Scope Global -Name route53Records, userDefAzureDNSZone, userDefAzureTargetDomain
 
     # If we wrote any records, clean up the record set variable
     if ($recordsWritten -ne 0) {
@@ -323,16 +351,34 @@ function cleanup(){
 
     }
 
-    exit
+    #exit
     
 }
 
 function main() {
-
     defineEnvironment
-    parseRoute53
-    azureImportRecords
-    cleanup
+
+    $ZoneIds = "", "" # Here you put Route53 Zone Ids (it's an array)
+	$ZoneNames = "", "" # Here you put Zone names (it's also an array)
+	$DomainNames = "", "" # Here you put Domain names (again, it's an array)
+
+	for ($i = 0; $i -lt $ZoneIds.Count; $i++){
+		# AWS Route53 Hosted Zone to Transfer
+		$GLOBAL:route53HostedZone = $ZoneIds[$i] # [Hosted Zone Id]
+
+		# Windows Azure Target Domain
+		$GLOBAL:userDefAzureDNSZone = $ZoneNames[$i] # Target Azure DNS Zone Name
+		$GLOBAL:userDefAzureTargetDomain =  $DomainNames[$i] # Target Azure DNS Domain
+		if ($i -eq 0) {
+			Add-Member -InputObject $azureConfig -MemberType NoteProperty -Name azureDNSZone -Value (Get-AzureRmDnsZone -Name ($ZoneNames[$i]) –ResourceGroupName $azureConfig.resourceGroup)
+		} else {
+			$azureConfig.azureDNSZone = Get-AzureRmDnsZone -Name ($ZoneNames[$i]) –ResourceGroupName $azureConfig.resourceGroup
+		}
+
+		parseRoute53
+		azureImportRecords
+		cleanup
+	}
 
 }
 
